@@ -657,8 +657,8 @@ function initTableBrowser() {
       if (code === 'users') continue;
       const room = rooms[code];
       if (!room || !room.players) continue;
-      const pCount = Object.keys(room.players||{}).length;
-      if (pCount === 0) { remove(ref(db, `rami/${code}`)); continue; }
+      const humanCount = Object.values(room.players||{}).filter(p=>!p.isBot).length;
+      if (humanCount === 0) { remove(ref(db, `rami/${code}`)); continue; }
       const lastActive = room.lastActive || room.createdAt || 0;
       if (Date.now()-lastActive > 30*60*1000) continue;
       counter++;
@@ -666,7 +666,6 @@ function initTableBrowser() {
       const info = document.createElement('div'); info.className = 'room-info';
       const title = document.createElement('span'); title.innerHTML = `<strong style="color:var(--gold-light)">Table ${code}</strong>`;
       const meta = document.createElement('span'); meta.className = 'room-meta';
-      const humanCount = Object.values(room.players||{}).filter(p=>!p.isBot).length;
       const botCount = Object.values(room.players||{}).filter(p=>p.isBot).length;
       meta.textContent = `${humanCount}/4 players${botCount ? ` (+${botCount} bot)` : ''} · ${room.status||'waiting'}`;
       info.appendChild(title); info.appendChild(meta);
@@ -839,7 +838,17 @@ document.getElementById('copy-code-btn').addEventListener('click', () => {
 
 document.getElementById('leave-waiting-btn').addEventListener('click', async () => {
   if (!roomCode || !myId) return;
-  try { await remove(roomRef(`/players/${myId}`)); } catch(e) {}
+  try {
+    await remove(roomRef(`/players/${myId}`));
+    // Clean up table if only bots remain
+    const snap = await get(roomRef('/players'));
+    if (snap.exists()) {
+      const remaining = Object.values(snap.val());
+      if (remaining.every(p => p.isBot)) {
+        await remove(roomRef());
+      }
+    }
+  } catch(e) {}
   if (unsubscribeRoom) { unsubscribeRoom(); unsubscribeRoom = null; }
   roomCode = null; myId = null; isHost = false;
   document.getElementById('waiting-room').style.display = 'none';
@@ -1339,6 +1348,7 @@ function updateOpeningProgress(gs){
   const p=gs.players[humanPlayerId];
   if(!p||gs.phase==='done'){el.textContent='';return;}
   if(p.hasOpened){el.textContent='✓ Opened';return;}
+  if(!p.melds) p.melds = [];
   let total=p.melds.reduce((s,m)=>s+m.cards.reduce((s2,c)=>s2+(isJoker(c)?10:cardValue(c,{aceHigh:true})),0),0);
   let clean=p.melds.some(m=>isCleanMeld(m));
   for(const group of _pendingMelds){clean=clean||isCleanMeld(group);for(const c of group.cards)total+=isJoker(c)?10:cardValue(c,{aceHigh:true});}
@@ -1709,6 +1719,19 @@ async function goBackToLobby() {
   document.getElementById('gameover-overlay').classList.remove('show');
   document.getElementById('game').style.display = 'none';
   document.getElementById('lobby').style.display = 'flex';
+  // Remove player from table and clean up if only bots remain
+  if (roomCode && myId) {
+    try {
+      await remove(roomRef(`/players/${myId}`));
+      const snap = await get(roomRef('/players'));
+      if (snap.exists()) {
+        const remaining = Object.values(snap.val());
+        if (remaining.every(p => p.isBot)) {
+          await remove(roomRef());
+        }
+      }
+    } catch(e) {}
+  }
   if (unsubscribeRoom) { unsubscribeRoom(); unsubscribeRoom = null; }
   if (watchdogInterval) { clearInterval(watchdogInterval); watchdogInterval = null; }
   gameState = null; localGameState = null; myHand = [];
@@ -1736,11 +1759,11 @@ function botToast(msg) {
 async function botPlayTurn(gs) {
   if (_botPlaying) return;
   _botPlaying = true;
+  try {
   const p = gs.players[gs.currentTurn];
   if (!p.isBot || gs.phase === 'done') { _botPlaying = false; return; }
 
   // Read the latest state from Firebase to ensure we have fresh data
-  try {
     const gsSnap = await get(roomRef('/gameState'));
     if (!gsSnap.exists()) { _botPlaying = false; return; }
     const freshGs = gsSnap.val();
