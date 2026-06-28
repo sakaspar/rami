@@ -762,20 +762,27 @@ function goToWaiting() {
   const unsub = onValue(roomRef(), snap => {
     if (!snap.exists()) return;
     const room = snap.val();
-    renderWaitingPlayers(room.players||{});
+    renderWaitingPlayers(room);
     if (room.status === 'playing' || room.gameState) { unsub(); goToGame(); }
   });
   unsubscribeRoom = () => unsub();
 }
 
-function renderWaitingPlayers(players) {
+function renderWaitingPlayers(room) {
+  const players = room.players || {};
+  const hostUid = room.host || '';
+  const isThisHost = currentUser?.uid === hostUid;
+
   const list = document.getElementById('player-list');
   list.innerHTML = '';
   const arr = Object.values(players).sort((a,b)=>a.joinedAt-b.joinedAt);
+
+  let humanCount = 0;
   for (const p of arr) {
+    if (!p.isBot) humanCount++;
     const li = document.createElement('li');
     const isMe = p.authUid === currentUser?.uid;
-    li.innerHTML = `<span class="dot"></span>${p.photoURL ? `<img class="waiting-avatar" src="${escapeHtml(p.photoURL)}" alt="${escapeHtml(p.name)}">` : ''}<span>${escapeHtml(p.name)}${p.isBot ? ' <span class="bot-tag">BOT</span>' : ''}${isMe ? ' (You)' : ''}</span>${p.authUid === (players[Object.keys(players).find(k=>players[k].isHost)].authUid) ? '<span class="host-badge">Host</span>' : ''}`;
+    li.innerHTML = `<span class="dot"></span>${p.photoURL ? `<img class="waiting-avatar" src="${escapeHtml(p.photoURL)}" alt="${escapeHtml(p.name)}">` : ''}<span>${escapeHtml(p.name)}${p.isBot ? ' <span class="bot-tag">BOT</span>' : ''}${isMe ? ' (You)' : ''}</span>${p.authUid === hostUid ? '<span class="host-badge">Host</span>' : ''}`;
     list.appendChild(li);
   }
 
@@ -784,31 +791,25 @@ function renderWaitingPlayers(players) {
   const statusEl = document.getElementById('waiting-status');
   const hostControls = document.getElementById('host-controls');
 
-  // Host UID is stored at room level
-  get(ref(db, `rami/${roomCode}/host`)).then(hostSnap => {
-    const hostUid = hostSnap.val();
-    const isThisHost = currentUser?.uid === hostUid;
+  hostControls.style.display = isThisHost ? 'block' : 'none';
 
-    hostControls.style.display = isThisHost ? 'block' : 'none';
-
-    const botAddArea = document.getElementById('bot-add-area');
-    if (isThisHost) {
-      const openSeats = 4 - Object.keys(players).length;
-      if (openSeats > 0) {
-        botAddArea.innerHTML = Array.from({length: openSeats}, (_, i) =>
-          `<button class="add-bot-btn" data-idx="${i}">+ Add Bot</button>`
-        ).join('');
-      } else {
-        botAddArea.innerHTML = '';
-      }
-      startBtn.style.display = count >= 2 ? 'block' : 'none';
-      startBtn.textContent = count >= 4 ? 'Start Game (Full)' : `Start Game (${count}/4)`;
-      statusEl.textContent = count >= 2 ? 'Ready to start!' : `Need at least 2 players (${count}/4)`;
+  const botAddArea = document.getElementById('bot-add-area');
+  if (isThisHost) {
+    const openSeats = 4 - Object.keys(players).length;
+    if (openSeats > 0) {
+      botAddArea.innerHTML = Array.from({length: openSeats}, (_, i) =>
+        `<button class="add-bot-btn" data-idx="${i}">+ Add Bot</button>`
+      ).join('');
     } else {
-      startBtn.style.display = 'none';
-      statusEl.textContent = `Waiting for host to start… (${count}/4)`;
+      botAddArea.innerHTML = '';
     }
-  });
+    startBtn.style.display = count >= 2 ? 'block' : 'none';
+    startBtn.textContent = `${humanCount} human · ${count - humanCount} bot · ${count >= 4 ? 'Full' : `${count}/4`}`;
+    statusEl.textContent = count >= 2 ? 'Ready to start!' : `Need at least 1 more player (${count}/4)`;
+  } else {
+    startBtn.style.display = 'none';
+    statusEl.textContent = `${count}/4 players · Waiting for host to start…`;
+  }
 }
 
 document.getElementById('bot-add-area').addEventListener('click', async (e) => {
