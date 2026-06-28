@@ -763,7 +763,7 @@ function goToWaiting() {
     if (!snap.exists()) return;
     const room = snap.val();
     renderWaitingPlayers(room);
-    if (room.status === 'playing' || room.gameState) { unsub(); goToGame(); }
+    if (room.status === 'playing') { unsub(); goToGame(); }
   });
   unsubscribeRoom = () => unsub();
 }
@@ -904,6 +904,9 @@ async function initAndSyncGame(playersObj) {
     }
   }
 
+  // Unsub host's waiting room listener BEFORE writes to avoid premature transition
+  if (unsubscribeRoom) unsubscribeRoom();
+
   await set(roomRef('/gameState'), gs);
   await set(roomRef('/botHands'), botHands);
   // Store human hands in private paths
@@ -913,7 +916,8 @@ async function initAndSyncGame(playersObj) {
     }
   }
 
-  if (unsubscribeRoom) unsubscribeRoom();
+  // Signal joining clients AFTER all data is written
+  await update(roomRef(), { status: 'playing', lastActive: Date.now() });
   goToGame();
 }
 
@@ -1020,23 +1024,27 @@ function goToGame() {
       const myPlayer = gs.players.find(p => p.authUid === currentUser.uid);
       if (myPlayer) {
         humanPlayerId = myPlayer.id;
-        const handSnap = await get(roomRef(`/hands/${currentUser.uid}`));
-        if (handSnap.exists()) myHand = handSnap.val();
-        else myHand = [];
+        try {
+          const handSnap = await get(roomRef(`/hands/${currentUser.uid}`));
+          if (handSnap.exists()) myHand = handSnap.val();
+          else myHand = [];
+        } catch(e) { console.error('Failed to load hand:', e); myHand = []; }
       }
     }
 
     // If host, load bot hands
     if (isHost) {
-      const botSnap = await get(roomRef('/botHands'));
-      if (botSnap.exists()) {
-        const bh = botSnap.val();
-        for (const p of gs.players) {
-          if (p.isBot && bh[p.authUid]) {
-            p.hand = bh[p.authUid];
+      try {
+        const botSnap = await get(roomRef('/botHands'));
+        if (botSnap.exists()) {
+          const bh = botSnap.val();
+          for (const p of gs.players) {
+            if (p.isBot && bh[p.authUid]) {
+              p.hand = bh[p.authUid];
+            }
           }
         }
-      }
+      } catch(e) { console.error('Failed to load bot hands:', e); }
     }
 
     // Sync handCount from actual hand for current player
