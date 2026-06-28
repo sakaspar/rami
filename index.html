@@ -1007,6 +1007,7 @@ function canBeLaidOff(card,gs) {
 // JOIN / SYNC GAME
 // ══════════════════════════════════════════════════════════════════════════════
 function goToGame() {
+  console.log('=== goToGame called ===', { roomCode, isHost, hasId: !!currentUser?.uid });
   document.getElementById('lobby').style.display = 'none';
   document.getElementById('waiting-room').style.display = 'none';
   document.getElementById('game').style.display = 'block';
@@ -1014,20 +1015,24 @@ function goToGame() {
   if (unsubscribeRoom) unsubscribeRoom();
 
   const unsubGame = onValue(roomRef('/gameState'), async (snap) => {
+    console.log('gameState onValue fired, exists:', snap.exists(), 'path:', roomRef('/gameState').toString());
     if (!snap.exists()) return;
     const gs = snap.val();
+    console.log('gameState loaded:', { players: gs.players?.length, deckLen: gs.deck?.length, discardLen: gs.discardPile?.length, isArr: Array.isArray(gs.players), phase: gs.phase });
     localGameState = gs;
     gameState = gs;
 
     // Load my hand if I'm a human player
     if (currentUser?.uid) {
       const myPlayer = gs.players.find(p => p.authUid === currentUser.uid);
+      console.log('myPlayer lookup:', { uid: currentUser.uid, found: !!myPlayer, id: myPlayer?.id });
       if (myPlayer) {
         humanPlayerId = myPlayer.id;
         try {
           const handSnap = await get(roomRef(`/hands/${currentUser.uid}`));
           if (handSnap.exists()) myHand = handSnap.val();
           else myHand = [];
+          console.log('myHand loaded:', { len: myHand.length });
         } catch(e) { console.error('Failed to load hand:', e); myHand = []; }
       }
     }
@@ -1052,6 +1057,7 @@ function goToGame() {
       gs.players[humanPlayerId].handCount = myHand.length;
     }
 
+    console.log('calling render()');
     render();
   });
 
