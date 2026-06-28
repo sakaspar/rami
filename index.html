@@ -1019,6 +1019,10 @@ function goToGame() {
     if (!snap.exists()) return;
     const gs = snap.val();
     console.log('gameState loaded:', { players: gs.players?.length, deckLen: gs.deck?.length, discardLen: gs.discardPile?.length, isArr: Array.isArray(gs.players), phase: gs.phase });
+    // Firebase converts empty arrays to null — re-initialize them
+    for (const p of gs.players) {
+      if (!p.melds) p.melds = [];
+    }
     localGameState = gs;
     gameState = gs;
 
@@ -1133,12 +1137,12 @@ function renderPlayerAreas(gs) {
     area.appendChild(label);
     const meldsDiv = document.createElement('div');
     meldsDiv.className = 'player-melds';
-    for (const meld of p.melds) {
+    for (const meld of (p.melds || [])) {
       const row = document.createElement('div');
       const isLayoffTarget = (gs.phase==='meld'||gs.phase==='discard') && _selectedIndices.length===1;
       row.className = 'meld-row'+(isLayoffTarget?' clickable':'');
       row.dataset.playerId = i;
-      row.dataset.meldIdx = p.melds.indexOf(meld);
+      row.dataset.meldIdx = (p.melds || []).indexOf(meld);
       for (const card of meld.cards) {
         const el = document.createElement('div');
         el.className = `card-sm card-in-hand ${isJoker(card)?'joker-card':''}`;
