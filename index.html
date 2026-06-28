@@ -1089,7 +1089,7 @@ function goToGame() {
     const idx = parseInt(e.dataTransfer.getData('text/plain'));
     if (isNaN(idx)) return;
     const gs = localGameState;
-    if (!gs || gs.currentTurn !== humanPlayerId) return;
+    if (!gs || !isMyTurn(gs)) return;
     if (gs.phase === 'draw') { toast('Draw a card first'); return; }
     if (gs.phase === 'meld') {
       if (gs.mustMeldThisTurn) { toast('You must meld this turn!'); return; }
@@ -1104,9 +1104,11 @@ function goToGame() {
     const card = myHand[idx];
     if (!card) return;
     myHand.splice(idx, 1);
+    gs.players[gs.currentTurn].handCount = myHand.length;
     gs.discardPile.push(card);
     gs.turnActions.discarded = true;
     clearSelection();
+    render();
     if (myHand.length === 0) { await endRound(gs, gs.players[gs.currentTurn]); return; }
     const stillPlayable = myHand.some(c => canBeLaidOff(c, gs));
     if (canBeLaidOff(card, gs) && !stillPlayable) {
@@ -1421,6 +1423,7 @@ function addLayoffToGameState(gs, playerIdx, meldIdx, card) {
   const handIdx = myHand.findIndex(c => c.id === card.id);
   if (handIdx < 0) return;
   myHand.splice(handIdx, 1);
+  gs.players[gs.currentTurn].handCount = myHand.length;
   meld.cards.push(card);
   gs.turnActions.melded = true;
   gs.mustMeldThisTurn = false;
@@ -1463,10 +1466,12 @@ async function drawFromStock() {
   }
   const card = gs.deck.pop();
   myHand.push(card);
+  gs.players[gs.currentTurn].handCount = myHand.length;
   gs.turnActions.drew = true;
   gs.phase = 'meld';
   clearSelection();
   toast(`Drew: ${isJoker(card)?'JOKER':card.rank+card.suit}`);
+  render();
   await syncGameState(gs);
 }
 
@@ -1475,6 +1480,7 @@ async function drawFromDiscard() {
   if (!gs || gs.phase !== 'draw' || gs.turnActions.drew || gs.discardPile.length === 0 || !isMyTurn(gs)) return;
   const card = gs.discardPile.pop();
   myHand.push(card);
+  gs.players[gs.currentTurn].handCount = myHand.length;
   gs.turnActions.drew = true;
   gs.mustMeldThisTurn = true;
   gs.phase = 'meld';
@@ -1482,6 +1488,7 @@ async function drawFromDiscard() {
   _selectedIndices = [myHand.length - 1];
   toast(`Took discard: ${isJoker(card)?'JOKER':card.rank+card.suit} — must meld!`);
   addLog(`${gs.players[gs.currentTurn].name} took discard (must meld)`, 'info');
+  render();
   await syncGameState(gs);
 }
 
@@ -1507,11 +1514,13 @@ async function doMeld() {
     toast('Must keep 1 card to discard'); return false;
   }
   _pendingMelds.push({ cards: meldCards, type: result.type, name: result.name });
+  gs.players[gs.currentTurn].handCount = myHand.length;
   gs.turnActions.melded = true;
   gs.turnActions.hasMelded = true;
   gs.mustMeldThisTurn = false;
   clearSelection();
   toast(`Staged: ${result.name} (${_pendingMelds.length} group${_pendingMelds.length>1?'s':''})`);
+  render();
   await syncGameState(gs);
   return true;
 }
@@ -1597,9 +1606,11 @@ async function doDiscard() {
   if (gs.phase !== 'discard' || _selectedIndices.length !== 1 || !isMyTurn(gs)) return;
   const idx = _selectedIndices[0];
   const card = myHand.splice(idx, 1)[0];
+  gs.players[gs.currentTurn].handCount = myHand.length;
   gs.discardPile.push(card);
   gs.turnActions.discarded = true;
   clearSelection();
+  render();
   if (myHand.length === 0) { await endRound(gs, gs.players[gs.currentTurn]); return; }
   const stillPlayable = myHand.some(c => canBeLaidOff(c, gs));
   if (canBeLaidOff(card, gs) && !stillPlayable) {
