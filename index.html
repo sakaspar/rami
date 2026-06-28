@@ -1007,7 +1007,6 @@ function canBeLaidOff(card,gs) {
 // JOIN / SYNC GAME
 // ══════════════════════════════════════════════════════════════════════════════
 function goToGame() {
-  console.log('=== goToGame called ===', { roomCode, isHost, hasId: !!currentUser?.uid });
   document.getElementById('lobby').style.display = 'none';
   document.getElementById('waiting-room').style.display = 'none';
   document.getElementById('game').style.display = 'block';
@@ -1015,10 +1014,8 @@ function goToGame() {
   if (unsubscribeRoom) unsubscribeRoom();
 
   const unsubGame = onValue(roomRef('/gameState'), async (snap) => {
-    console.log('gameState onValue fired, exists:', snap.exists(), 'path:', roomRef('/gameState').toString());
     if (!snap.exists()) return;
     const gs = snap.val();
-    console.log('gameState loaded:', { players: gs.players?.length, deckLen: gs.deck?.length, discardLen: gs.discardPile?.length, isArr: Array.isArray(gs.players), phase: gs.phase });
     // Firebase converts empty arrays to null — re-initialize them
     for (const p of gs.players) {
       if (!p.melds) p.melds = [];
@@ -1029,14 +1026,12 @@ function goToGame() {
     // Load my hand if I'm a human player
     if (currentUser?.uid) {
       const myPlayer = gs.players.find(p => p.authUid === currentUser.uid);
-      console.log('myPlayer lookup:', { uid: currentUser.uid, found: !!myPlayer, id: myPlayer?.id });
       if (myPlayer) {
         humanPlayerId = myPlayer.id;
         try {
           const handSnap = await get(roomRef(`/hands/${currentUser.uid}`));
           if (handSnap.exists()) myHand = handSnap.val();
           else myHand = [];
-          console.log('myHand loaded:', { len: myHand.length });
         } catch(e) { console.error('Failed to load hand:', e); myHand = []; }
       }
     }
@@ -1061,7 +1056,6 @@ function goToGame() {
       gs.players[humanPlayerId].handCount = myHand.length;
     }
 
-    console.log('calling render()');
     render();
   });
 
@@ -1074,6 +1068,44 @@ function goToGame() {
   });
 
   unsubscribeRoom = () => { unsubGame(); unsubHand(); };
+
+  // Drag-and-drop discard: drop card onto discard pile
+  const discardDrop = document.getElementById('discard-pile');
+  discardDrop.addEventListener('dragover', (e) => e.preventDefault());
+  discardDrop.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    const idx = parseInt(e.dataTransfer.getData('text/plain'));
+    if (isNaN(idx)) return;
+    const gs = localGameState;
+    if (!gs || gs.currentTurn !== humanPlayerId) return;
+    if (gs.phase === 'draw') { toast('Draw a card first'); return; }
+    if (gs.phase === 'meld') {
+      if (gs.mustMeldThisTurn) { toast('You must meld this turn!'); return; }
+      if (_pendingMelds.length > 0) {
+        for (const group of _pendingMelds) for (const c of group.cards) myHand.push(c);
+        _pendingMelds = [];
+      }
+      gs.turnActions.melded = false;
+      gs.phase = 'discard';
+    }
+    if (gs.phase !== 'discard') return;
+    const card = myHand[idx];
+    if (!card) return;
+    myHand.splice(idx, 1);
+    gs.discardPile.push(card);
+    gs.turnActions.discarded = true;
+    clearSelection();
+    if (myHand.length === 0) { await endRound(gs, gs.players[gs.currentTurn]); return; }
+    const stillPlayable = myHand.some(c => canBeLaidOff(c, gs));
+    if (canBeLaidOff(card, gs) && !stillPlayable) {
+      gs.players[gs.currentTurn].score += 10;
+      toast(`⚠️ Discarded a playable card! +10 penalty`);
+      addLog(`${gs.players[gs.currentTurn].name} discarded a playable card +10`, 'fault');
+    }
+    toast(`Discarded ${isJoker(card)?'JOKER':card.rank+card.suit}`);
+    addLog(`${gs.players[gs.currentTurn].name} discarded ${isJoker(card)?'JOKER':card.rank+card.suit}`, 'info');
+    await endTurn(gs);
+  });
 
   // Host turn watchdog
   if (isHost) {
@@ -1726,6 +1758,10 @@ async function botPlayTurn(gs) {
     const botP = freshGs.players.find(bp => bp.id === p.id);
     if (!botP || !botP.hand) { _botPlaying = false; return; }
 
+    // Firebase converts empty arrays to null — re-initialize them
+    for (const bp of freshGs.players) {
+      if (!bp.melds) bp.melds = [];
+    }
     // Copy state to localGameState
     localGameState = freshGs;
     gameState = freshGs;
