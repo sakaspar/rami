@@ -1037,11 +1037,14 @@ function goToGame() {
       const myPlayer = gs.players.find(p => p.authUid === currentUser.uid);
       if (myPlayer) {
         humanPlayerId = myPlayer.id;
-        try {
-          const handSnap = await get(roomRef(`/hands/${currentUser.uid}`));
-          if (handSnap.exists()) myHand = handSnap.val();
-          else myHand = [];
-        } catch(e) { console.error('Failed to load hand:', e); myHand = []; }
+        // Only re-read from Firebase on initial load; local myHand is always authoritative
+        if (!myHand || myHand.length === 0) {
+          try {
+            const handSnap = await get(roomRef(`/hands/${currentUser.uid}`));
+            if (handSnap.exists()) myHand = handSnap.val();
+            else myHand = [];
+          } catch(e) { console.error('Failed to load hand:', e); myHand = []; }
+        }
       }
     }
 
@@ -1259,6 +1262,7 @@ function renderHand(gs) {
         const [moved]=hand.splice(fromIdx,1); hand.splice(toIdx,0,moved);
         _selectedIndices=_selectedIndices.map(si=>{if(si===fromIdx)return-1;if(fromIdx<si&&si<=toIdx)return si-1;if(toIdx<=si&&si<fromIdx)return si+1;return si;}).filter(si=>si>=0);
         renderHand(gs);updateButtons(gs);
+        if (currentUser?.uid && myHand) set(roomRef(`/hands/${currentUser.uid}`), myHand);
       }
     });
     wrapper.appendChild(el); container.appendChild(wrapper);
@@ -1744,6 +1748,7 @@ function sortHand(mode) {
   if (mode === 'rank') myHand.sort((a,b)=>{if(isJoker(a)&&isJoker(b))return 0;if(isJoker(a))return 1;if(isJoker(b))return -1;return RANK_VAL[a.rank]-RANK_VAL[b.rank];});
   else { const so={'♠':0,'♥':1,'♦':2,'♣':3}; myHand.sort((a,b)=>{if(isJoker(a)&&isJoker(b))return 0;if(isJoker(a))return 1;if(isJoker(b))return -1;if(a.suit!==b.suit)return so[a.suit]-so[b.suit];return RANK_VAL[a.rank]-RANK_VAL[b.rank];}); }
   clearSelection(); render();
+  if (currentUser?.uid && myHand) set(roomRef(`/hands/${currentUser.uid}`), myHand);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
